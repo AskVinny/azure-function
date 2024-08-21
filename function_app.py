@@ -8,7 +8,7 @@ app = func.FunctionApp()
 @app.route(route="python_function_azure", auth_level=func.AuthLevel.Anonymous)
 def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function processed a request.')
-
+    print(req)
     name = req.params.get('name')
     if not name:
         try:

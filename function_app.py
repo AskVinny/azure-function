@@ -133,9 +133,21 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
                 response.raise_for_status()  # Raise an exception for bad status codes
                 
                 logging.info(f"Successfully posted lead information to API. Response: {response.text}")
+                return func.HttpResponse(json.dumps(lead_info), mimetype="application/json", status_code=200)
             except requests.RequestException as e:
-                logging.error(f"Failed to post lead information to API. Error: {str(e)}")
-            return func.HttpResponse(json.dumps(lead_info), mimetype="application/json", status_code=200)
+                error_details = {
+                    "error": str(e),
+                    "api_url": f"{api_base_url}/api/tickets",
+                    "status_code": e.response.status_code if hasattr(e, 'response') else None,
+                    "response_text": e.response.text if hasattr(e, 'response') else None,
+                    "request_body": json.dumps(payload)
+                }
+                logging.error(f"Failed to post lead information to API. Error details: {json.dumps(error_details)}")
+                return func.HttpResponse(
+                    json.dumps({"error": "Failed to post lead information to API", "details": error_details}),
+                    mimetype="application/json",
+                    status_code=500
+                )
         else:
             logging.warning("No email body found in the request payload")
             return func.HttpResponse("No email body found in the request payload", status_code=400)

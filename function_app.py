@@ -4,13 +4,15 @@ import json
 import logging
 from bs4 import BeautifulSoup
 import re
+import os
+import requests
 
 app = func.FunctionApp()
 
 @app.route(route="forwarded_email_reader", auth_level=func.AuthLevel.ANONYMOUS)
 def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function processed a request.')
-    API_BASE_URL="http://51.21.6.228"
+    
 
     try:
         req_body = req.get_json()
@@ -103,9 +105,10 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
                 })
             
             logging.info(f"Extracted lead information: {lead_info}")
-            import requests
-
-            API_BASE_URL = "https://your-api-base-url.com"  # Replace with your actual API base URL
+            
+            
+            api_base_url = os.environ["API_BASE_URL"]
+            x_auth_key = os.environ["X_AUTH_KEY"]
 
             # Prepare the payload
             payload = {
@@ -118,9 +121,15 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
                 "conversation_id": "123456"
             }
 
+            # Prepare headers with x-auth-key
+            headers = {
+                "x-auth-key": x_auth_key,
+                "Content-Type": "application/json"
+            }
+
             try:
-                # Make the POST request to the API
-                response = requests.post(f"{API_BASE_URL}/api/tickets", json=payload)
+                # Make the POST request to the API with headers
+                response = requests.post(f"{api_base_url}/api/tickets", json=payload, headers=headers)
                 response.raise_for_status()  # Raise an exception for bad status codes
                 
                 logging.info(f"Successfully posted lead information to API. Response: {response.text}")

@@ -6,6 +6,7 @@ from bs4 import BeautifulSoup
 import re
 import os
 import requests
+import phonenumbers
 
 app = func.FunctionApp()
 
@@ -48,61 +49,27 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
                 address = extract_info(plain_text, r'Address:(.*?);')
                 email = extract_info(plain_text, r'Email:(.*?);')
                 phone = extract_info(plain_text, r'Phone:(.*?);')
-                requirements = extract_info(plain_text, r'Requirements:(.*?);')
-                prop_description = extract_info(plain_text, r'PropDescription:(.*?);')
-                prop_address = extract_info(plain_text, r'PropAddress:(.*?);')
-                prop_price = extract_info(plain_text, r'PropPrice:(.*?);')
-                prop_reference = extract_info(plain_text, r'PropReference:(.*?);')
-                consent = extract_info(plain_text, r'Consent:(.*?);')
-                branch = extract_info(plain_text, r'Branch:(.*?);')
-                enquiry_type = extract_info(plain_text, r'EnquiryType:(.*?);')
+
             elif source == 'zoopla':
-                name = extract_info(plain_text, r'Name:\s*(.*?)(?:\r?\n|\r|$)')
-                phone = extract_info(plain_text, r'Telephone:\s*(.*?)(?:\r?\n|\r|$)')
-                email = extract_info(plain_text, r'Email:\s*(.*?)(?:\r?\n|\r|$)')
-                enquiry_type = extract_info(plain_text, r'Type of enquiry:\s*(.*?)(?:\r?\n|\r|$)')
-                unique_reference = extract_info(plain_text, r'Unique Reference:\s*(.*?)(?:\r?\n|\r|$)')
-                prop_reference = extract_info(plain_text, r'Your property ref:\s*(.*?)(?:\r?\n|\r|$)')
-                prop_address = extract_info(plain_text, r'Address:\s*(.*?)(?:\r?\n|\r|$)')
-                prop_price = extract_info(plain_text, r'£([\d,]+)\s*pcm')
-                prop_description = extract_info(plain_text, r'(?:£[\d,]+\s*pcm\s*-\s*)(.*?)(?:\r?\n|\r|$)')
-                location = extract_info(plain_text, r'Location:\s*(.*?)(?:\r?\n|\r|$)')
-                property_type = extract_info(plain_text, r'Type of property:\s*(.*?)(?:\r?\n|\r|$)')
-                price_range = extract_info(plain_text, r'Price range:\s*(.*?)(?:\r?\n|\r|$)')
+                name = extract_info(plain_text, r'Name:\s*(.*?)(?:\r?\n|\r|$)', r'Telephone:')
+                phone = extract_info(plain_text, r'Telephone:\s*(.*?)(?:\r?\n|\r|$)', r'Email:')
+                email = extract_info(plain_text, r'Email:\s*(.*?)(?:\r?\n|\r|$)', r'Type of enquiry:')
+                address = extract_info(plain_text, r'Address:\s*(.*?)(?:\r?\n|\r|$)', r'Message:')
+
             else:
                 # For other sources, you might need to implement different extraction logic
                 name = address = email = phone = "Extraction not implemented for this source"
 
+            # Format the phone number
+            phone = format_phone_number(phone)
+
             lead_info = {
                 "name": name,
                 "email": email,
-                "phone": phone
+                "phone": phone,
+                "address": address,
+                "source": source,
             }
-            
-            if source == 'onthemarket':
-                lead_info.update({
-                    "address": address,
-                    "requirements": requirements,
-                    "property_description": prop_description,
-                    "property_address": prop_address,
-                    "property_price": prop_price,
-                    "property_reference": prop_reference,
-                    "consent": consent,
-                    "branch": branch,
-                    "enquiry_type": enquiry_type
-                })
-            elif source == 'zoopla':
-                lead_info.update({
-                    "enquiry_type": enquiry_type,
-                    "unique_reference": unique_reference,
-                    "property_reference": prop_reference,
-                    "property_address": prop_address,
-                    "property_price": prop_price,
-                    "property_description": prop_description,
-                    "location": location,
-                    "property_type": property_type,
-                    "price_range": price_range
-                })
             
             logging.info(f"Extracted lead information: {lead_info}")
             
@@ -112,11 +79,12 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
 
             # Prepare the payload
             payload = {
+               
                 "tenant_id": 15,
-                "title": "New Viewing Request has been created",
-                "summary": lead_info,
-                "status": "open",
-                "team_member_id": 1,
+                "title": f"New {source} Viewing Request has been created",
+                "summary": json.dumps(lead_info),
+                "status": "pending",
+                "team_member_id": 9,
                 "workflow_id": None,
                 "conversation_id": "123456"
             }
@@ -126,6 +94,9 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
                 "x-auth-key": x_auth_key,
                 "Content-Type": "application/json"
             }
+
+            # Log the request body
+            logging.info(f"Request body: {payload}")
 
             try:
                 # Make the POST request to the API with headers
@@ -139,10 +110,9 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
                     "error": str(e),
                     "api_url": f"{api_base_url}/api/tickets",
                     "status_code": e.response.status_code if hasattr(e, 'response') else None,
-                    "response_text": e.response.text if hasattr(e, 'response') else None,
-                    "request_body": json.dumps(payload)
+                    "response_text": e.response.text if hasattr(e, 'response') else None
                 }
-                logging.error(f"Failed to post lead information to API. Error details: {json.dumps(error_details)}")
+                logging.error(f"Failed to post lead information to API. Error details: {error_details}")
                 return func.HttpResponse(
                     json.dumps({"error": "Failed to post lead information to API", "details": error_details}),
                     mimetype="application/json",
@@ -155,6 +125,31 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
         logging.error("Invalid JSON in request body")
         return func.HttpResponse("Invalid request body", status_code=400)
 
-def extract_info(text, pattern):
+def extract_info(text, pattern, end_pattern=None):
     match = re.search(pattern, text, re.IGNORECASE)
-    return match.group(1).strip() if match else "Not found"
+    if match:
+        if end_pattern:
+            end = re.search(end_pattern, match.group(1))
+            return match.group(1)[:end.start()].strip() if end else match.group(1).strip()
+        return match.group(1).strip()
+    return None
+
+def format_phone_number(phone):
+    if phone is None:
+        return None
+    
+    # Remove all non-digit characters
+    phone = re.sub(r'\D', '', phone)
+    
+    try:
+        # Parse the phone number
+        parsed_number = phonenumbers.parse(phone, None)
+        
+        # Format the number in E.164 format
+        formatted_number = phonenumbers.format_number(parsed_number, phonenumbers.PhoneNumberFormat.E164)
+        
+        # Remove the '+' sign from the beginning
+        return formatted_number[1:]
+    except phonenumbers.NumberParseException:
+        # If parsing fails, return the original number
+        return phone

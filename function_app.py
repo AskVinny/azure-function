@@ -22,9 +22,9 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
         if 'rightmove' in json.dumps(req_body).lower():
             source = 'rightmove'
         elif 'zoopla' in json.dumps(req_body).lower():
-            source = 'zoopla'
+            source = 'Zoopla'
         elif 'onthemarket' in json.dumps(req_body).lower():
-            source = 'onthemarket'
+            source = 'OnTheMarket'
         
         if source:
             logging.info(f"Source: {source}")
@@ -81,7 +81,7 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
             payload = {
                
                 "tenant_id": 15,
-                "title": f"New {source} Viewing Request has been created",
+                "title": f"{source} Viewing Request",
                 "summary": json.dumps(lead_info),
                 "status": "pending",
                 "team_member_id": 9,
@@ -143,7 +143,7 @@ def format_phone_number(phone):
     
     try:
         # Parse the phone number
-        parsed_number = phonenumbers.parse(phone, None)
+        parsed_number = phonenumbers.parse(phone, "GB")
         
         # Format the number in E.164 format
         formatted_number = phonenumbers.format_number(parsed_number, phonenumbers.PhoneNumberFormat.E164)

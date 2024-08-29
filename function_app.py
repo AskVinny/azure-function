@@ -14,10 +14,9 @@ app = func.FunctionApp()
 def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function processed a request.')
     
-
     try:
         req_body = req.get_json()
-        logging.info(f"Received request body: {json.dumps(req_body)}")
+        #logging.info(f"Received request body: {json.dumps(req_body)}")
         # Check for source in the request body
         source = None
         if 'rightmove' in json.dumps(req_body).lower():
@@ -40,7 +39,6 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
             plain_text = soup.get_text(separator=' ', strip=True)
             logging.info(f"Parsed plain text: {plain_text[:200]}...")  # Log first 200 characters
             
-
             # Extract information based on the source
             if source == 'Rightmove':
                 name = extract_info(plain_text, r'Name:(.*?);')
@@ -52,13 +50,11 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
                 address = extract_info(plain_text, r'Address:(.*?);')
                 email = extract_info(plain_text, r'Email:(.*?);')
                 phone = extract_info(plain_text, r'Phone:(.*?);')
-
             elif source == 'Zoopla':
                 name = extract_info(plain_text, r'Name:\s*(.*?)(?:\r?\n|\r|$)', r'Telephone:')
                 phone = extract_info(plain_text, r'Telephone:\s*(.*?)(?:\r?\n|\r|$)', r'Email:')
                 email = extract_info(plain_text, r'Email:\s*(.*?)(?:\r?\n|\r|$)', r'Type of enquiry:')
                 address = extract_info(plain_text, r'Address:\s*(.*?)(?:\r?\n|\r|$)', r'Message:')
-
             else:
                 # For other sources, you might need to implement different extraction logic
                 name = address = email = phone = "Extraction not implemented for this source"
@@ -79,7 +75,6 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
             
             logging.info(f"Extracted lead information: {lead_info}")
             
-            
             api_base_url = os.environ["API_BASE_URL"]
             x_auth_key = os.environ["X_AUTH_KEY"]
             logging.info(f"API Base URL: {api_base_url}")
@@ -94,80 +89,86 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
                     "x-auth-key": x_auth_key,
                     "Content-Type": "application/json"
                 }
+                
                 search_body = {
-                    "phone": "11234567890"
+                    "phone": phone
                 }
                 
+                logging.info(f"Search body: {search_body}")
                 
                 try:
-                    logging.info(f"Searching for user with email: {email}")
-                    search_response = requests.get(search_url, headers=search_headers, json=search_body)
-                    search_response.raise_for_status()
-                    search_data = search_response.json()
-                    logging.info(f"Search response: {search_data}")
+                    logging.info(f"Searching for user with phone: {phone}")
+                    search_response = requests.post('http://51.21.6.228/api/tenants/phone', headers=search_headers, json=search_body)
                     
-                    if search_data.get("data"):
-                        # User found, return their ID
-                        user_id = search_data["data"][0]["id"]
-                        logging.info(f"Existing user found with ID: {user_id}")
-                        return user_id
-                    else:
-                        logging.info("User not found, creating new user")
-                        # User not found, create a new user
-                        # First, get the property_id using the postcode
-                        postcode = extract_postcode(address)
-                        logging.info(f"Extracted postcode: {postcode}")
-                        property_url = f"{api_base_url}/api/properties/find?Postcode={postcode}"
-                        property_response = requests.get(property_url, headers=search_headers)
-                        property_response.raise_for_status()
-                        property_data = property_response.json()
-                        
-                        if not property_data.get("data"):
-                            logging.error(f"No property found for postcode: {postcode}")
-                            raise ValueError("No property found for the given postcode")
-                        
-                        property_id = property_data["data"][0]["id"]
-                        logging.info(f"Found property ID: {property_id}")
-                        
-                        # Create new user payload
-                        new_user_payload = {
-                            "name": name,
-                            "email": email,
-                            "country_code": "+44",  # Default to UK
-                            "phone": phone,
-                            "address": address,
-                            "status": "prospect",
-                            "property_id": property_id,
-                            "additional_information": {}
-                        }
-                        
-                        # Create new user
-                        create_url = f"{api_base_url}/api/tenants/create-tenant"
-                        create_headers = {
-                            "x-auth-key": x_auth_key,
-                            "Content-Type": "application/json"
-                        }
-                        logging.info(f"Creating new user with payload: {new_user_payload}")
-                        create_response = requests.post(create_url, json=new_user_payload, headers=create_headers)
-                        create_response.raise_for_status()
-                        create_data = create_response.json()
-                        
-                        new_user_id = create_data["data"]["id"]
-                        logging.info(f"New user created with ID: {new_user_id}")
-                        return new_user_id
+                    if search_response.status_code == 200:
+                        search_data = search_response.json()
+                        logging.info(f"Response Content: {search_response.content}")
+                        logging.info(f"Search response: {search_data}")
+
+                        if search_data.get("data"):
+                            # User found, return their ID
+                            user_id = search_data["data"]["tenant_id"]
+                            logging.info(f"Existing user found with ID: {user_id}")
+                            return user_id
+                    
+                    # If status code is 404 or any other non-200 status, proceed to create a new user
+                    logging.info("User not found or EError occurred, creating new user")
+                    # User not found, create a new user
+                    # First, get the property_id using the postcode
+                    # TODO: Make this dynamic
+                    postcode = "NN8%20123"
+                    #postcode = extract_postcode("NN8%20123")
+                    logging.info(f"Extracted postcode: {postcode}")
+                    property_url = f"{api_base_url}/api/properties/find?Postcode={postcode}"
+                    property_response = requests.get(property_url, headers=search_headers)
+                    property_response.raise_for_status()
+                    property_data = property_response.json()
+                    
+                    if not property_data.get("data"):
+                        logging.error(f"No property found for postcode: {postcode}")
+                        raise ValueError("No property found for the given postcode")
+                    
+                    property_id = property_data["data"][0]["id"]
+                    logging.info(f"Found property ID: {property_id}")
+                    
+                    # Create new user payload
+                    new_user_payload = {
+                        "name": name,
+                        "email": email,
+                        "country_code": "+44",  # Default to UK
+                        "phone": phone,
+                        "address": address,
+                        "status": "prospect",
+                        "user_id": 1,
+                        "property_id": property_id,
+                        "additional_information": {}
+                    }
+                    
+                    logging.info(f"New user payload: {new_user_payload}")
+                    # Create new user
+                    create_url = f"{api_base_url}/api/tenants/create-tenant"
+                    create_headers = {
+                        "x-auth-key": x_auth_key,
+                        "Content-Type": "application/json"
+                    }
+                    logging.info(f"Creating new user with payload: {new_user_payload}")
+                    create_response = requests.post(create_url, json=new_user_payload, headers=create_headers)
+                    create_response.raise_for_status()
+                    create_data = create_response.json()
+                    
+                    new_user_id = create_data["data"]["id"]
+                    logging.info(f"New user created with ID: {new_user_id}")
+                    return new_user_id
                 
                 except requests.RequestException as e:
                     logging.error(f"Error in get_or_create_user: {str(e)}")
                     raise
-
-            
 
             # Use the function to get or create user
             tenant_id = get_or_create_user(email, name, phone, address)
             logging.info(f"Tenant ID for payload: {tenant_id}")
             # Prepare the payload
             payload = {
-               
                 "tenant_id": tenant_id,
                 "title": f"{source} Viewing Request",
                 "summary": json.dumps(lead_info),
@@ -211,9 +212,12 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
         else:
             logging.warning("No email body found in the request payload")
             return func.HttpResponse("No email body found in the request payload", status_code=400)
-    except ValueError:
+    except json.JSONDecodeError:
         logging.error("Invalid JSON in request body")
-        return func.HttpResponse("Invalid request body", status_code=400)
+        return func.HttpResponse("Invalid JSON in request body", status_code=400)
+    except Exception as e:
+        logging.error(f"Unexpected error: {str(e)}")
+        return func.HttpResponse(f"An unexpected error occurred: {str(e)}", status_code=500)
 
 def extract_info(text, pattern, end_pattern=None):
     match = re.search(pattern, text, re.IGNORECASE)

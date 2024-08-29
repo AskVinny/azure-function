@@ -65,6 +65,15 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
             phone = format_phone_number(phone)
             logging.info(f"Formatted phone number: {phone}")
 
+            # Clean the email address
+            email = clean_email(email)
+            logging.info(f"Cleaned email address: {email}")
+
+            if address is None:
+                address = "No Address Listed"
+        
+
+
             lead_info = {
                 "name": name,
                 "email": email,
@@ -116,20 +125,23 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
                     # User not found, create a new user
                     # First, get the property_id using the postcode
                     # TODO: Make this dynamic
-                    postcode = "NN8%20123"
-                    #postcode = extract_postcode("NN8%20123")
-                    logging.info(f"Extracted postcode: {postcode}")
-                    property_url = f"{api_base_url}/api/properties/find?Postcode={postcode}"
-                    property_response = requests.get(property_url, headers=search_headers)
-                    property_response.raise_for_status()
-                    property_data = property_response.json()
-                    
-                    if not property_data.get("data"):
-                        logging.error(f"No property found for postcode: {postcode}")
-                        raise ValueError("No property found for the given postcode")
-                    
-                    property_id = property_data["data"][0]["id"]
-                    logging.info(f"Found property ID: {property_id}")
+                    property_id = 1
+                    if address and address != "No Address Listed":
+                        postcode = "NN8%20123"
+                        #postcode = extract_postcode("NN8%20123")
+                        logging.info(f"Extracted postcode: {postcode}")
+                        property_url = f"{api_base_url}/api/properties/find?Postcode={postcode}"
+                        property_response = requests.get(property_url, headers=search_headers)
+                        property_response.raise_for_status()
+                        property_data = property_response.json()
+                        
+                        if property_data.get("data"):
+                            property_id = property_data["data"][0]["id"]
+                            logging.info(f"Found property ID: {property_id}")
+                        else:
+                            logging.warning(f"No property found for postcode: {postcode}")
+                    else:
+                        logging.info("No address provided, setting property_id to 0")
                     
                     # Create new user payload
                     new_user_payload = {
@@ -137,9 +149,9 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
                         "email": email,
                         "country_code": "+44",  # Default to UK
                         "phone": phone,
-                        "address": address,
+                        "address": address if address else "No Address Listed",
                         "status": "prospect",
-                        "user_id": 1,
+                        "organisation_id": 4,
                         "property_id": property_id,
                         "additional_information": {}
                     }
@@ -156,7 +168,7 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
                     create_response.raise_for_status()
                     create_data = create_response.json()
                     
-                    new_user_id = create_data["data"]["id"]
+                    new_user_id = create_data["data"]["tenant_id"]
                     logging.info(f"New user created with ID: {new_user_id}")
                     return new_user_id
                 
@@ -165,7 +177,7 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
                     raise
 
             # Use the function to get or create user
-            tenant_id = get_or_create_user(email, name, phone, address)
+            tenant_id = get_or_create_user(email, name, phone, lead_info["address"])
             logging.info(f"Tenant ID for payload: {tenant_id}")
             # Prepare the payload
             payload = {
@@ -255,3 +267,14 @@ def extract_postcode(address):
         return postcode_match.group()
     else:
         raise ValueError("No valid postcode found in the address")
+
+def clean_email(email):
+    if email is None:
+        return None
+    
+    # Use regex to extract just the email address
+    email_match = re.search(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', email)
+    if email_match:
+        return email_match.group()
+    else:
+        return None

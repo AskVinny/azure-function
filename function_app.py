@@ -13,7 +13,7 @@ app = func.FunctionApp()
 @app.route(route="forwarded_email_reader", auth_level=func.AuthLevel.ANONYMOUS)
 def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function processed a request.')
-    
+    property_reference = None
     try:
         req_body = req.get_json()
         #logging.info(f"Received request body: {json.dumps(req_body)}")
@@ -37,7 +37,7 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
             # Remove HTML tags from the email body
             soup = BeautifulSoup(email_body, 'html.parser')
             plain_text = soup.get_text(separator=' ', strip=True)
-            logging.info(f"Parsed plain text: {plain_text[:200]}...")  # Log first 200 characters
+            logging.info(f"Parsed plain text: {plain_text}")
             
             # Extract information based on the source
             if source == 'Rightmove':
@@ -45,21 +45,29 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
                 address = extract_info(plain_text, r'Address:(.*?);')
                 email = extract_info(plain_text, r'Email:(.*?);')
                 phone = extract_info(plain_text, r'Phone:(.*?);')
+                property_reference = extract_info(plain_text, r'\b(?:\w+_)*MKSL(?:_\w+)*\b')
+
             elif source == 'OnTheMarket':
                 name = extract_info(plain_text, r'Name:(.*?);')
                 address = extract_info(plain_text, r'Address:(.*?);')
                 email = extract_info(plain_text, r'Email:(.*?);')
                 phone = extract_info(plain_text, r'Phone:(.*?);')
+                prop_ref = extract_info(plain_text, r'PropReference(.*?);')
+                property_reference = prop_ref if prop_ref else 'NOPROPERTYFOUND'
+
             elif source == 'Zoopla':
                 name = extract_info(plain_text, r'Name:\s*(.*?)(?:\r?\n|\r|$)', r'Telephone:')
                 phone = extract_info(plain_text, r'Telephone:\s*(.*?)(?:\r?\n|\r|$)', r'Email:')
                 email = extract_info(plain_text, r'Email:\s*(.*?)(?:\r?\n|\r|$)', r'Type of enquiry:')
                 address = extract_info(plain_text, r'Address:\s*(.*?)(?:\r?\n|\r|$)', r'Message:')
+                prop_ref = extract_info(plain_text, r'Your property ref:\s*(.*?)(?:\r?\n|\r|$)', r'Address:')
+                if not prop_ref:
+                    prop_ref = extract_info(plain_text, r'Unique Reference:\s*(.*?)(?:\r?\n|\r|$)', r'Your property ref:')
+                property_reference = prop_ref if prop_ref else 'NOPROPERTYFOUND'
             else:
                 # For other sources, you might need to implement different extraction logic
                 name = address = email = phone = "Extraction not implemented for this source"
-
-            logging.info(f"Extracted raw information - Name: {name}, Address: {address}, Email: {email}, Phone: {phone}")
+            logging.info(f"Extracted raw information - Name: {name}, Address: {address}, Email: {email}, Phone: {phone}, Property Reference: {property_reference}")
 
             # Format the phone number
             phone = format_phone_number(phone)
@@ -72,7 +80,18 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
             if address is None:
                 address = "No Address Listed"
         
+            # Generate random numbers for testing purposes
+            import random
+            random_phone = random.randint(1, 100)
+            random_email = random.randint(1, 1000)
 
+            # Modify phone number for testing
+            phone = f"447497432{random_phone:02d}"
+            logging.info(f"Modified phone number for testing: {phone}")
+
+            # Modify email for testing
+            email = f"rory+{random_email}@askvinny.co.uk"
+            logging.info(f"Modified email for testing: {email}")
 
             lead_info = {
                 "name": name,
@@ -125,12 +144,9 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
                     # User not found, create a new user
                     # First, get the property_id using the postcode
                     # TODO: Make this dynamic
-                    property_id = 1
                     if address and address != "No Address Listed":
-                        postcode = "NN8%20123"
-                        #postcode = extract_postcode("NN8%20123")
-                        logging.info(f"Extracted postcode: {postcode}")
-                        property_url = f"{api_base_url}/api/properties/find?Postcode={postcode}"
+                        logging.info(f"Extracted property reference: {property_reference}")
+                        property_url = f"{api_base_url}/api/properties/find?PropertyReference={property_reference}"
                         property_response = requests.get(property_url, headers=search_headers)
                         property_response.raise_for_status()
                         property_data = property_response.json()
@@ -139,13 +155,49 @@ def python_function_azure(req: func.HttpRequest) -> func.HttpResponse:
                             property_id = property_data["data"][0]["id"]
                             logging.info(f"Found property ID: {property_id}")
                         else:
-                            logging.warning(f"No property found for postcode: {postcode}")
+                            property_payload = {
+                                "name": address,
+                                "image": None,
+                                "organisation_id": 4,
+                                "owner_id": 1,
+                                "country_id": 228,
+                                "last_gas_safe_check": "2024-06-05 23:00:00",
+                                "additional_information": {
+                                    "PropertyReference": property_reference
+                                },
+                                "compliances": [
+                                    {
+                                        "compliance_id": 1,
+                                        "completed_date": "2024-06-05 23:00:00",
+                                        "not_yet_done": False,
+                                    },
+                                     {
+                                        "compliance_id": 2,
+                                        "completed_date": "2024-06-05 23:00:00",
+                                        "not_yet_done": False,
+                                    },
+                                     {
+                                        "compliance_id": 3,
+                                        "completed_date": "2024-06-05 23:00:00",
+                                        "not_yet_done": False,
+                                    }
+                                ]
+                            }
+                            logging.warning(f"Attempting to create new property: {property_payload}")
+                            property_response = requests.post(f"{api_base_url}/api/properties/create-property", headers=search_headers, json=property_payload)
+                            property_response.raise_for_status()
+                            property_data = property_response.json()
+                            if property_data.get("data"):
+                                property_id = property_data["data"]["id"]
+                                logging.info(f"Created new property with ID: {property_id}")
+                            else:
+                                logging.warning(f"Failed to create new property: {property_data}")
+                                property_id = 0
                     else:
-                        logging.info("No address provided, setting property_id to 0")
-                    
+                        logging.info("No valid address provided, setting property_id to 0")
                     # Create new user payload
                     new_user_payload = {
-                        "name": name,
+                        "name": name.title(),
                         "email": email,
                         "country_code": "+44",  # Default to UK
                         "phone": phone,
